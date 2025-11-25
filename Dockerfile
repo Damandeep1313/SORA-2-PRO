@@ -1,6 +1,6 @@
 # Use an official Node.js runtime as the base image.
 # Using 'lts-slim' is recommended for production as it is smaller than the default image.
-FROM node:20-lts-slim
+FROM node:18
 
 # Set the working directory inside the container
 WORKDIR /usr/src/app
