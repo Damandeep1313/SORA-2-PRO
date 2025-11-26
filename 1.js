@@ -2,7 +2,6 @@
 const express = require('express');
 const Replicate = require('replicate');
 const cloudinary = require('cloudinary').v2;
-// Use require('dotenv') for standard environment variable loading
 require('dotenv').config();
 
 const app = express();
@@ -49,16 +48,18 @@ const validateReplicateKey = (req, res, next) => {
 
 // --- CORE ENDPOINT: GENERATE, UPLOAD, AND RETURN CLOUDINARY LINK ---
 app.post('/generate-video', validateReplicateKey, async (req, res) => {
-  const { prompt, duration_seconds, aspect_ratio, reference_image_url } = req.body;
+  // 1. UPDATED: Extract an array of URLs
+  const { prompt, duration_seconds, aspect_ratio, **reference_image_urls** } = req.body; 
 
   try {
-    // 1. Replicate Client Init & Input Setup
+    // 1.1. Replicate Client Init & Input Setup
     const replicate = new Replicate({ auth: req.replicateApiKey });
 
     if (!prompt) {
       return res.status(400).json({ error: 'Missing required parameter: prompt' });
     }
-
+    
+    // 1.2. Basic input structure
     const input = {
       prompt: prompt,
       seconds: duration_seconds || 4,
@@ -66,35 +67,36 @@ app.post('/generate-video', validateReplicateKey, async (req, res) => {
       resolution: 'high',
     };
 
-    // I2V Logic: reference_image_url is passed directly as a URL string
-    if (reference_image_url) {
-      input.input_reference = reference_image_url;
-      console.log(`[INFO] I2V Enabled. Ref Image: ${reference_image_url}`);
+    // 2. UPDATED: Multiple Image-to-Video (I2V) Logic
+    if (reference_image_urls && Array.isArray(reference_image_urls) && reference_image_urls.length > 0) {
+      // NOTE: We pass the array of URLs directly. The model must be capable 
+      // of handling an array of URLs for this key. This is the best guess
+      // without knowing the exact model schema for multiple inputs.
+      input.input_reference = reference_image_urls; 
+      
+      console.log(`[INFO] Multi-Image I2V Enabled. Found ${reference_image_urls.length} Ref Images.`);
     }
 
     console.log(`[REQUEST] Submitting ${MODEL_ID} job. Waiting for video generation...`);
 
-    // 2. Call Replicate API
+    // 3. Call Replicate API
     const replicateOutput = await replicate.run(MODEL_ID, { input });
     
     // 🔥 FIX FOR TypeError: Ensure the output URL is explicitly converted to a string.
-    // Cloudinary's underlying library requires a string, not a Node.js URL object.
     const videoUrlFromReplicate = String(replicateOutput.url()); 
     
     console.log(`[SUCCESS] Replicate job complete. Video URL: ${videoUrlFromReplicate}`);
 
-    // 3. Upload Video from Remote URL to Cloudinary
+    // 4. Upload Video from Remote URL to Cloudinary
     console.log('[UPLOAD] Uploading video to Cloudinary from remote URL...');
     
-    // This leverages Cloudinary's ability to pull from a remote URL, resolving 
-    // MIME-type issues as Cloudinary handles the fetch directly.
     const cloudinaryResult = await cloudinary.uploader.upload(videoUrlFromReplicate, {
-      resource_type: 'video', // CRITICAL: Must be set to 'video'
+      resource_type: 'video', 
       folder: 'sora_generated_videos',
       timeout: 180000, // Extend timeout for large video files (3 minutes)
     });
 
-    // 4. Return the Final Cloudinary URL
+    // 5. Return the Final Cloudinary URL
     console.log(`[SUCCESS] Cloudinary upload complete. Public URL: ${cloudinaryResult.secure_url}`);
 
     res.json({
@@ -106,7 +108,6 @@ app.post('/generate-video', validateReplicateKey, async (req, res) => {
   } catch (error) {
     console.error(`[ERROR] Generation or Upload failed:`, error);
     
-    // Log the configuration error if Cloudinary is misconfigured (shows "your_cloud_name")
     if (process.env.CLOUDINARY_CLOUD_NAME === 'your_cloud_name') {
         console.error("!!! CLOUDINARY CONFIGURATION ERROR: Check your .env file !!!");
     }
